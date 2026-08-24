@@ -1,0 +1,307 @@
+{
+  "name": "Telegram to Drive to Facebook (AI Caption FINAL FIX)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "d70f9957-3859-40e9-be48-0e2e7773b176",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-4448, 1728]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.telegram.org/botYOUR_TELEGRAM_BOT_TOKEN/getUpdates",
+        "options": {}
+      },
+      "id": "f30e7955-bf5f-48f9-a6dd-c4d4781bdcfb",
+      "name": "1. Fetch Telegram Updates",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-4240, 1728]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\n\nif (!response.ok || !response.result || response.result.length === 0) {\n  return [{ json: { found: false, message: 'No updates found. Forward a video to your bot first!' } }];\n}\n\nlet latestVideo = null;\nlet latestUrl = 'No link provided';\n\nfor (const update of response.result) {\n  const msg = update.message;\n  if (!msg) continue;\n\n  const textToSearch = (msg.text || '') + ' ' + (msg.caption || '');\n  const urlMatch = textToSearch.match(/(https?:\\/\\/[^\\s]+)/);\n  if (urlMatch) {\n    latestUrl = urlMatch[1];\n  }\n\n  if (msg.video) {\n    latestVideo = {\n      found: true,\n      file_id: msg.video.file_id,\n      file_size: msg.video.file_size || 0,\n      duration: msg.video.duration || 0,\n      caption: msg.caption || ''\n    };\n  } else if (msg.document && msg.mime_type && msg.mime_type.startsWith('video/')) {\n    latestVideo = {\n      found: true,\n      file_id: msg.document.file_id,\n      file_size: msg.document.file_size || 0,\n      duration: 0,\n      caption: msg.caption || ''\n    };\n  }\n}\n\nif (!latestVideo) {\n  return [{ json: { found: false, message: 'No video found in the recent updates.' } }];\n}\n\nlatestVideo.original_link = latestUrl;\n\nreturn [{ json: latestVideo }];"
+      },
+      "id": "f6af968d-28d3-4786-9c1c-62e904d5e7a9",
+      "name": "2. Extract Video Info & URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-4016, 1728]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 1 },
+          "conditions": [
+            {
+              "id": "cond-video-found-001",
+              "leftValue": "={{ $json.found }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "df8f1061-9db3-497e-a908-08e84e638df8",
+      "name": "3. Video Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-3792, 1728]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.telegram.org/botYOUR_TELEGRAM_BOT_TOKEN/getFile?file_id={{ $json.file_id }}",
+        "options": {}
+      },
+      "id": "90e831aa-7130-4def-8471-0becffe2047d",
+      "name": "4. Get File Path",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-3568, 1632]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.telegram.org/file/botYOUR_TELEGRAM_BOT_TOKEN/{{ $json.result.file_path }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "f5be981c-e184-4239-8bfe-05f3fe146c2d",
+      "name": "5. Download Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-3360, 1632]
+    },
+    {
+      "parameters": {
+        "name": "=tiktok_video_{{ $now.format('yyyyMMdd_HHmmss') }}.mp4",
+        "driveId": { "__rl": true, "mode": "list", "value": "My Drive" },
+        "folderId": { "__rl": true, "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID", "mode": "id" },
+        "options": {}
+      },
+      "id": "4a0ba0cc-6670-44f2-8b8f-77eac2559553",
+      "name": "6. Upload to Google Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [-3136, 1632],
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "YOUR_CREDENTIAL_ID", "name": "Google Drive account" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "share",
+        "fileId": { "__rl": true, "value": "={{ $json.id }}", "mode": "id" },
+        "permissionsUi": {
+          "permissionsValues": { "role": "reader", "type": "anyone" }
+        },
+        "options": {}
+      },
+      "id": "17bf333a-b46f-40c5-8f9b-f20d4505a9a9",
+      "name": "7. Make File Public",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [-2912, 1632],
+      "credentials": {
+        "googleDriveOAuth2Api": { "id": "YOUR_CREDENTIAL_ID", "name": "Google Drive account" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const uploadNode = $('6. Upload to Google Drive').first().json;\nconst videoData = $('2. Extract Video Info & URL').first().json;\nconst fileId = uploadNode.id;\n\nif (!fileId) {\n  return [{ json: { error: { message: 'No file ID from Google Drive upload', details: uploadNode } } }];\n}\n\nconst directUrl = 'https://drive.google.com/uc?export=download&id=' + fileId;\n\nreturn [{\n  json: {\n    file_url: directUrl,\n    drive_file_id: fileId,\n    original_link: videoData.original_link || 'No link provided',\n    video_caption: videoData.caption || '',\n    status: 'URL_READY'\n  }\n}];"
+      },
+      "id": "48b638f0-8a14-4460-9bf4-7324c9f2150f",
+      "name": "8. Build Direct Link",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-2688, 1632]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/v1/chat/completions",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"default\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are an expert social media manager. Analyze this video link using web search if available. Generate a highly engaging, viral-style Facebook caption with relevant emojis and 3-5 trending hashtags. IMPORTANT: The caption MUST be written entirely in English, regardless of the language of the source video, text, or link. Output ONLY the final English caption text, no conversational filler.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Video Link: {{ $json.original_link }}\"\n    }\n  ]\n}",
+        "options": {
+          "timeout": 120000,
+          "response": { "response": { "neverError": true } }
+        }
+      },
+      "id": "ai-post-001-0000-0000-000000000001",
+      "name": "9. POST AI Request (Returns Caption)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-2464, 1632],
+      "notes": "Updated system prompt to strictly enforce English output."
+    },
+    {
+      "parameters": {
+        "jsCode": "// FIXED: Your AI bridge is SYNCHRONOUS. The POST response (this node's input) already contains the FULL caption.\n// The old GET /v1/result node returned 404 'Not Found' and was HIDING the real caption - it is now removed.\n\nconst aiData = $input.first().json;\nconst driveData = $('8. Build Direct Link').first().json;\n\nlet caption = '';\n\n// Standard OpenAI chat.completion format (what your bridge returns)\nif (aiData && aiData.choices && aiData.choices[0] && aiData.choices[0].message && typeof aiData.choices[0].message.content === 'string') {\n  caption = aiData.choices[0].message.content;\n}\nelse if (aiData && aiData.choices && aiData.choices[0] && typeof aiData.choices[0].text === 'string') {\n  caption = aiData.choices[0].text;\n}\nelse if (aiData && typeof aiData.result === 'string') caption = aiData.result;\nelse if (aiData && typeof aiData.response === 'string') caption = aiData.response;\nelse if (aiData && typeof aiData.caption === 'string') caption = aiData.caption;\nelse if (aiData && typeof aiData.content === 'string') caption = aiData.content;\nelse if (typeof aiData === 'string') caption = aiData;\n\n// Cleanup: turn literal '\\n' text into real line breaks, remove ** markdown bold markers\ncaption = (caption || '').replace(/\\\\n/g, '\\n').replace(/\\*\\*/g, '').trim();\n\n// Safety fallback\nif (!caption || caption.toLowerCase().includes('not found')) {\n  caption = 'Auto-posted from Telegram via Google Drive';\n}\n\nreturn [{\n  json: {\n    ...driveData,\n    ai_caption: caption\n  }\n}];"
+      },
+      "id": "ai-parse-001-0000-0000-000000000001",
+      "name": "10. Extract AI Caption",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-2240, 1632],
+      "notes": "Reads the caption from the POST response (its own input). Keeps ALL emojis and hashtags, fixes \\n line breaks, strips ** markers."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v23.0/YOUR_FACEBOOK_PAGE_ID/videos?access_token=YOUR_FACEBOOK_PAGE_ACCESS_TOKEN",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "file_url", "value": "={{ $json.file_url }}" },
+            { "name": "title", "value": "=TikTok Video - {{ $now.format('yyyy-MM-dd HH:mm') }}" },
+            { "name": "description", "value": "={{ $json.ai_caption }}" },
+            { "name": "published", "value": "true" }
+          ]
+        },
+        "options": {
+          "response": { "response": { "neverError": true } },
+          "timeout": 300000
+        }
+      },
+      "id": "689f39ac-533f-4d0d-b758-56988cd18c65",
+      "name": "11. Upload to Facebook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-2016, 1632]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 1 },
+          "conditions": [
+            {
+              "id": "cond-no-error",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notExists" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0d91c227-7597-4070-8935-fbb1d296b0e7",
+      "name": "12. Check Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-1792, 1632]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "status", "value": "SUCCESS" },
+            { "name": "facebook_video_id", "value": "={{ $json.id }}" },
+            { "name": "ai_caption_used", "value": "={{ $json.ai_caption || '' }}" },
+            { "name": "message", "value": "=Video uploaded to Facebook with AI Caption! Video ID: {{ $json.id }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7ba64602-f104-4958-af79-746169b2035b",
+      "name": "13. Success Output",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-1568, 1520]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "status", "value": "FAILED" },
+            { "name": "error_message", "value": "={{ $json.error?.message || 'Unknown error' }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "29ababec-887a-4f8c-8b7a-e7ed9c2c668f",
+      "name": "14. Log Error",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-1568, 1728]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "status", "value": "NO_VIDEO" },
+            { "name": "message", "value": "={{ $json.message || 'No video found. Forward a TikTok video to your bot.' }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6f60a303-c467-4f47-9a36-4f9b1a4d4613",
+      "name": "15. No Video Found",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-3568, 1840]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{ "node": "1. Fetch Telegram Updates", "type": "main", "index": 0 }]]
+    },
+    "1. Fetch Telegram Updates": {
+      "main": [[{ "node": "2. Extract Video Info & URL", "type": "main", "index": 0 }]]
+    },
+    "2. Extract Video Info & URL": {
+      "main": [[{ "node": "3. Video Found?", "type": "main", "index": 0 }]]
+    },
+    "3. Video Found?": {
+      "main": [
+        [{ "node": "4. Get File Path", "type": "main", "index": 0 }],
+        [{ "node": "15. No Video Found", "type": "main", "index": 0 }]
+      ]
+    },
+    "4. Get File Path": {
+      "main": [[{ "node": "5. Download Video", "type": "main", "index": 0 }]]
+    },
+    "5. Download Video": {
+      "main": [[{ "node": "6. Upload to Google Drive", "type": "main", "index": 0 }]]
+    },
+    "6. Upload to Google Drive": {
+      "main": [[{ "node": "7. Make File Public", "type": "main", "index": 0 }]]
+    },
+    "7. Make File Public": {
+      "main": [[{ "node": "8. Build Direct Link", "type": "main", "index": 0 }]]
+    },
+    "8. Build Direct Link": {
+      "main": [[{ "node": "9. POST AI Request (Returns Caption)", "type": "main", "index": 0 }]]
+    },
+    "9. POST AI Request (Returns Caption)": {
+      "main": [[{ "node": "10. Extract AI Caption", "type": "main", "index": 0 }]]
+    },
+    "10. Extract AI Caption": {
+      "main": [[{ "node": "11. Upload to Facebook", "type": "main", "index": 0 }]]
+    },
+    "11. Upload to Facebook": {
+      "main": [[{ "node": "12. Check Success", "type": "main", "index": 0 }]]
+    },
+    "12. Check Success": {
+      "main": [
+        [{ "node": "13. Success Output", "type": "main", "index": 0 }],
+        [{ "node": "14. Log Error", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {}
+}
